@@ -15,6 +15,7 @@ return new class extends Migration
            $table->id();
            $table->integer('number')->unique();
            $table->integer('capacity');
+           $table->string('status')->default('available'); // available, occupied, reserved
            $table->string('location')->nullable(); // terrasse, intérieur, salon privé
            $table->timestamps();
         });
