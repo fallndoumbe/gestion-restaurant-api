@@ -16,6 +16,23 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('auth')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::get('/profile', [AuthController::class, 'profile']);
+            // Routes Commandes (Serveur et Gérant)
+    Route::middleware(['role:server,manager'])->group(function () {
+        Route::apiResource('orders', OrderController::class)->except(['destroy']);
+        Route::put('orders/{id}/status', [OrderController::class, 'updateStatus']);
+        Route::post('orders/{id}/items', [OrderController::class, 'addItems']);
+        Route::delete('orders/{id}/items/{itemId}', [OrderController::class, 'removeItem']);
+        Route::post('orders/{id}/pay', [OrderController::class, 'payOrder']);
+        Route::get('orders/{id}/bill', [OrderController::class, 'generateBill']);
+        Route::get('tables/{id}/orders', [OrderController::class, 'tableOrders']);
+    });
+        // Routes Rapports (Gérant uniquement)
+    Route::middleware(['role:manager'])->group(function () {
+        Route::get('reports/daily', [ReportController::class, 'dailyReport']);
+        Route::get('reports/period', [ReportController::class, 'periodReport']);
+        Route::get('reports/history', [ReportController::class, 'reportHistory']);
+        Route::get('reports/categories', [ReportController::class, 'categoryReport']);
+    });
         
         // Inscription staff (uniquement gérant)
         Route::post('/register/staff', [AuthController::class, 'registerStaff'])
