@@ -3,6 +3,9 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\TableController;
+use App\Http\Controllers\CategoryController;
+use App\Http\Middleware\CheckRole;
 
 
 Route::prefix('auth')->group(function () {
@@ -16,7 +19,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('auth')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::get('/profile', [AuthController::class, 'profile']);
-        
+
         // Inscription staff (uniquement gérant)
         Route::post('/register/staff', [AuthController::class, 'registerStaff'])
             ->middleware('role:manager');
@@ -36,7 +39,7 @@ Route::get('/tables', [TableController::class, 'index'])
         ->middleware(CheckRole::class . ':server,manager');
 Route::get('/tables/{id}', [TableController::class, 'show'])
         ->middleware(CheckRole::class . ':server,manager');
-    
+
     // (Gérant )
  Route::middleware(CheckRole::class . ':manager')->group(function () {
         Route::post('/tables', [TableController::class, 'store']);

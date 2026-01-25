@@ -11,9 +11,9 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    
+
      //Inscription Client
-     
+
     public function register(Request $request)
     {
         $request->validate([
@@ -27,7 +27,6 @@ class AuthController extends Controller
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
-            'role' => 'client',
             'phone' => $request->phone,
         ]);
 
@@ -44,7 +43,7 @@ class AuthController extends Controller
         ], 201);
     }
 
-    
+
     public function registerStaff(Request $request)
     {
         // Vérifier que l'utilisateur connecté est un gérant
@@ -78,9 +77,9 @@ class AuthController extends Controller
         ], 201);
     }
 
-    
+
      //Connexion
-     
+
     public function login(Request $request)
     {
         $request->validate([
@@ -113,9 +112,9 @@ class AuthController extends Controller
         ], 200);
     }
 
-    
-     //Déconnexion 
-     
+
+     //Déconnexion
+
     public function logout(Request $request)
     {
         $request->user()->currentAccessToken()->delete();
@@ -126,9 +125,9 @@ class AuthController extends Controller
         ], 200);
     }
 
-    
+
      //Profil utilisateur
-     
+
     public function profile(Request $request)
     {
         return response()->json([

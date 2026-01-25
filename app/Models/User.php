@@ -2,62 +2,73 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable;
+    use HasApiTokens, Notifiable;
 
     protected $fillable = [
-        'name',
-        'email',
-        'password',
-        'role',
-        'phone',
+        'name', 'email', 'password', 'role', 'phone',
     ];
 
-    protected $hidden = [
-        'password',
-        'remember_token',
-    ];
+    protected $hidden = ['password'];
 
-    protected $casts = [
-        'email_verified_at' => 'datetime',
-        'password' => 'hashed',
-    ];
-
-    
-    public function orders()
+    public function orders(): HasMany
     {
-        return $this->hasMany(Order::class);
+        return $this->hasMany(Order::class, 'user_id');
     }
 
-    public function servedOrders()
+    public function servedOrders(): HasMany
     {
         return $this->hasMany(Order::class, 'server_id');
     }
 
-    public function reservations()
+    public function reservations(): HasMany
     {
         return $this->hasMany(Reservation::class);
     }
 
-    
-    public function isManager()
+    /**
+     * Vérifie si l'utilisateur est un manager (admin)
+     */
+    public function isManager(): bool
     {
         return $this->role === 'manager';
     }
 
-    public function isServer()
+    /**
+     * Vérifie si l'utilisateur est un serveur
+     */
+    public function isServer(): bool
     {
         return $this->role === 'server';
     }
 
-    public function isClient()
+    /**
+     * Vérifie si l'utilisateur est un client
+     */
+    public function isClient(): bool
     {
         return $this->role === 'client';
+    }
+
+    /**
+     * Alias pour isManager() - certains codes peuvent utiliser isAdmin()
+     */
+    public function isAdmin(): bool
+    {
+        return $this->isManager();
+    }
+
+    /**
+     * Vérifie si l'utilisateur est du personnel (manager ou serveur)
+     */
+    public function isStaff(): bool
+    {
+        return $this->isManager() || $this->isServer();
     }
 }

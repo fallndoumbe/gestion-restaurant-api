@@ -64,4 +64,25 @@ class Order extends Model
     {
         return $query->where('status', 'completed');
     }
+
+  
+    public function calculateTotals()
+    {
+        $subtotal = $this->items->sum(function ($item) {
+            return $item->unit_price * $item->quantity;
+        });
+
+        $taxRate = 0.18; // 18% TVA
+        $tax = $subtotal * $taxRate;
+        $total = $subtotal + $tax;
+
+        $this->update([
+            'subtotal' => $subtotal,
+            'tax' => $tax,
+            'total' => $total
+        ]);
+
+        return $this;
+    }
+
 }
