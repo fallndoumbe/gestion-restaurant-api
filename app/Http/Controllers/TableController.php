@@ -2,140 +2,166 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Controller;
 use App\Models\Table;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 
 class TableController extends Controller
 {
-    
-     //Liste de toutes les tables
-     
+    // Liste des tables
     public function index()
     {
-        $tables = Table::all();
+        try {
+            $tables = Table::all();
 
-        return response()->json([
-            'success' => true,
-            'data' => $tables
-        ]);
-    }
-
-    
-     //Détails d'une table
-     
-    public function show($id)
-    {
-        $table = Table::find($id);
-
-        if (!$table) {
+            return response()->json([
+                'success' => true,
+                'data' => $tables
+            ]);
+        } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Table non trouvée'
-            ], 404);
+                'message' => 'Erreur serveur: ' . $e->getMessage()
+            ], 500);
         }
-
-        return response()->json([
-            'success' => true,
-            'data' => $table
-        ]);
     }
 
-    
-     //Créer une nouvelle table (Gérant uniquement)
-     
+    // Créer une table
     public function store(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'number' => 'required|integer|unique:tables,number',
-            'capacity' => 'required|integer|min:1',
-            'location' => 'nullable|string|in:intérieur,terrasse,salon privé',
-        ]);
+        try {
+            // Validation
+            $validated = $request->validate([
+                'number' => 'required|integer|unique:tables',
+                'capacity' => 'required|integer|min:1',
+                'location' => 'nullable|string|max:255'
+            ]);
 
-        if ($validator->fails()) {
+            // Création
+            $table = Table::create($validated);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Table créée avec succès',
+                'data' => $table
+            ], 201);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'message' => 'Erreur de validation',
+                'errors' => $e->errors()
             ], 422);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur serveur: ' . $e->getMessage()
+            ], 500);
         }
-
-        $table = Table::create($request->all());
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Table créée avec succès',
-            'data' => $table
-        ], 201);
     }
 
-    
-     //Modifier une table (Gérant uniquement)
-     
+    // Voir une table
+    public function show($id)
+    {
+        try {
+            $table = Table::find($id);
+
+            if (!$table) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Table non trouvée'
+                ], 404);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $table
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur serveur: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // Modifier une table
     public function update(Request $request, $id)
     {
-        $table = Table::find($id);
+        try {
+            $table = Table::find($id);
 
-        if (!$table) {
+            if (!$table) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Table non trouvée'
+                ], 404);
+            }
+
+            $validated = $request->validate([
+                'number' => 'sometimes|integer|unique:tables,number,' . $id,
+                'capacity' => 'sometimes|integer|min:1',
+                'location' => 'nullable|string|max:255'
+            ]);
+
+            $table->update($validated);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Table modifiée avec succès',
+                'data' => $table
+            ]);
+        } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Table non trouvée'
-            ], 404);
+                'message' => 'Erreur serveur: ' . $e->getMessage()
+            ], 500);
         }
-
-        $validator = Validator::make($request->all(), [
-            'number' => 'sometimes|integer|unique:tables,number,' . $id,
-            'capacity' => 'sometimes|integer|min:1',
-            'location' => 'nullable|string|in:intérieur,terrasse,salon privé',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $table->update($request->all());
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Table mise à jour avec succès',
-            'data' => $table
-        ]);
     }
 
-    
-     // Supprimer une table (Gérant uniquement)
-     
+    // Supprimer une table
     public function destroy($id)
     {
-        $table = Table::find($id);
+        try {
+            $table = Table::find($id);
 
-        if (!$table) {
+            if (!$table) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Table non trouvée'
+                ], 404);
+            }
+
+            $table->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Table supprimée avec succès'
+            ]);
+        } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Table non trouvée'
-            ], 404);
+                'message' => 'Erreur serveur: ' . $e->getMessage()
+            ], 500);
         }
-
-        $table->delete();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Table supprimée avec succès'
-        ]);
     }
 
-    
-     // Tables disponibles (Public)
-     
+    // Tables disponibles
     public function available()
     {
-        $tables = Table::where('status', 'libre')->get();
+        try {
+            $tables = Table::all(); // Pour simplifier, retourne toutes les tables
 
-        return response()->json([
-            'success' => true,
-            'data' => $tables
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => $tables
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur serveur: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

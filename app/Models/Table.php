@@ -2,28 +2,27 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Table extends Model
 {
-    use HasFactory;
+    protected $table = 'tables';
 
     protected $fillable = [
         'number',
         'capacity',
-        'location'
-    ];
+        'location',
+        'status'
+        ];
 
-    // Relation avec les réservations
-    public function reservations()
+    public function orders(): HasMany
     {
-        return $this->hasMany(Reservation::class);
+        return $this->hasMany(Order::class, 'table_id');
     }
 
-    // Relation avec les commandes
-    public function orders()
+    public function reservations(): HasMany
     {
-        return $this->hasMany(Order::class);
+        return $this->hasMany(Reservation::class, 'table_id');
     }
 }

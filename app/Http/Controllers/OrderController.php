@@ -1,40 +1,21 @@
 <?php
+
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\OrderItem;
-use App\Models\Table;
 use App\Models\MenuItem;
+use App\Models\Table;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Auth;
 
 class OrderController extends Controller
 {
-    // Lister toutes les commandes (Serveur/Gérant)
-    public function index(Request $request)
+    // Liste des commandes (serveur/gérant)
+    public function index()
     {
-        $query = Order::with(['user', 'table', 'server', 'items.menuItem'])
-            ->orderBy('created_at', 'desc');
-
-        // Filtres
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->has('date')) {
-            $query->whereDate('created_at', $request->date);
-        }
-
-        if ($request->has('table_id')) {
-            $query->where('table_id', $request->table_id);
-        }
-
-        if (Auth::user()->role === 'server') {
-            $query->where('server_id', Auth::id());
-        }
-
-        $orders = $query->paginate(20);
+        $orders = Order::with(['user', 'table', 'server', 'items.menuItem'])->get();
 
         return response()->json([
             'success' => true,
@@ -42,25 +23,13 @@ class OrderController extends Controller
         ]);
     }
 
-    // Afficher une commande spécifique
+    // Détail d'une commande (authentifié)
     public function show($id)
     {
         $order = Order::with(['user', 'table', 'server', 'items.menuItem'])->find($id);
 
         if (!$order) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Commande non trouvée'
-            ], 404);
-        }
-
-        // Vérifier les autorisations
-        $user = Auth::user();
-        if ($user->role === 'client' && $order->user_id !== $user->id) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Accès non autorisé'
-            ], 403);
+            return response()->json(['message' => 'Commande non trouvée'], 404);
         }
 
         return response()->json([
@@ -69,7 +38,7 @@ class OrderController extends Controller
         ]);
     }
 
-    // Créer une nouvelle commande
+    // Créer une commande (client/serveur)
     public function store(Request $request)
     {
         $request->validate([
@@ -81,44 +50,53 @@ class OrderController extends Controller
             'notes' => 'nullable|string|max:500'
         ]);
 
-        try {
-            DB::beginTransaction();
+        // Vérifier que la table existe
+        $table = Table::find($request->table_id);
+        if (!$table) {
+            return response()->json(['message' => 'Table non trouvée'], 404);
+        }
 
-            // Vérifier si la table est disponible
-            $table = Table::find($request->table_id);
-            if (!$table || $table->status === 'reserved') {
-                throw new \Exception('Cette table n\'est pas disponible');
+        // Vérifier que les plats sont disponibles
+        foreach ($request->items as $item) {
+            $menuItem = MenuItem::find($item['menu_item_id']);
+            if (!$menuItem || !$menuItem->is_available) {
+                return response()->json([
+                    'message' => "Le plat {$menuItem->name} n'est pas disponible"
+                ], 400);
             }
+        }
 
+        DB::beginTransaction();
+
+        try {
             // Créer la commande
             $order = Order::create([
-                'user_id' => Auth::user()->role === 'client' ? Auth::id() : null,
+                'user_id' => auth()->id(),
                 'table_id' => $request->table_id,
-                'server_id' => Auth::user()->role === 'server' ? Auth::id() : null,
+                'server_id' => auth()->user()->role === 'server' ? auth()->id() : null,
                 'status' => 'pending',
-                'payment_status' => 'pending',
-                'notes' => $request->notes
+                'notes' => $request->notes,
+                'subtotal' => 0,
+                'tax' => 0,
+                'total' => 0
             ]);
 
-            // Ajouter les items
             $subtotal = 0;
-            foreach ($request->items as $item) {
-                $menuItem = MenuItem::find($item['menu_item_id']);
-                
-                if (!$menuItem || !$menuItem->is_available) {
-                    throw new \Exception("{$menuItem->name} n'est pas disponible");
-                }
+
+            // Ajouter les items
+            foreach ($request->items as $itemData) {
+                $menuItem = MenuItem::find($itemData['menu_item_id']);
 
                 $orderItem = OrderItem::create([
                     'order_id' => $order->id,
-                    'menu_item_id' => $item['menu_item_id'],
-                    'quantity' => $item['quantity'],
+                    'menu_item_id' => $itemData['menu_item_id'],
+                    'quantity' => $itemData['quantity'],
                     'unit_price' => $menuItem->price,
-                    'special_notes' => $item['special_notes'] ?? null,
+                    'special_notes' => $itemData['special_notes'] ?? null,
                     'status' => 'pending'
                 ]);
 
-                $subtotal += $menuItem->price * $item['quantity'];
+                $subtotal += $menuItem->price * $itemData['quantity'];
             }
 
             // Calculer les totaux
@@ -136,55 +114,43 @@ class OrderController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Commande créée avec succès',
                 'data' => $order->load('items.menuItem')
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage()
-            ], 400);
+            return response()->json(['message' => 'Erreur lors de la création: ' . $e->getMessage()], 500);
         }
     }
 
-    // Mettre à jour une commande
+    // Modifier une commande (serveur)
     public function update(Request $request, $id)
     {
         $order = Order::find($id);
 
         if (!$order) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Commande non trouvée'
-            ], 404);
+            return response()->json(['message' => 'Commande non trouvée'], 404);
         }
 
-        // Vérifier si la commande peut être modifiée
-        if (!in_array($order->status, ['pending', 'confirmed'])) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Cette commande ne peut plus être modifiée'
-            ], 400);
+        // Seuls les serveurs peuvent modifier les commandes
+        if (auth()->user()->role !== 'server' && auth()->user()->role !== 'manager') {
+            return response()->json(['message' => 'Non autorisé'], 403);
         }
 
         $request->validate([
-            'notes' => 'nullable|string|max:500'
+            'notes' => 'nullable|string|max:500',
+            'server_id' => 'nullable|exists:users,id'
         ]);
 
-        $order->update([
-            'notes' => $request->notes
-        ]);
+        $order->update($request->only(['notes', 'server_id']));
 
         return response()->json([
             'success' => true,
-            'message' => 'Commande mise à jour',
             'data' => $order
         ]);
     }
 
-    // Changer le statut d'une commande
+    // Changer le statut d'une commande (serveur)
     public function updateStatus(Request $request, $id)
     {
         $request->validate([
@@ -194,38 +160,7 @@ class OrderController extends Controller
         $order = Order::find($id);
 
         if (!$order) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Commande non trouvée'
-            ], 404);
-        }
-
-        // Logique de transition d'états
-        $allowedTransitions = [
-            'pending' => ['confirmed', 'cancelled'],
-            'confirmed' => ['preparing', 'cancelled'],
-            'preparing' => ['ready', 'cancelled'],
-            'ready' => ['served', 'cancelled'],
-            'served' => ['completed'],
-            'completed' => [],
-            'cancelled' => []
-        ];
-
-        if (!in_array($request->status, $allowedTransitions[$order->status])) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Transition de statut non autorisée'
-            ], 400);
-        }
-
-        // Si on confirme la commande, vérifier le stock
-        if ($request->status === 'confirmed') {
-            $this->checkAndUpdateStock($order);
-        }
-
-        // Si on annule, restaurer le stock
-        if ($request->status === 'cancelled' && $order->status === 'confirmed') {
-            $this->restoreStock($order);
+            return response()->json(['message' => 'Commande non trouvée'], 404);
         }
 
         $order->update(['status' => $request->status]);
@@ -237,16 +172,17 @@ class OrderController extends Controller
         ]);
     }
 
-    // Ajouter des items à une commande
+    // Ajouter des items à une commande (serveur)
     public function addItems(Request $request, $id)
     {
         $order = Order::find($id);
 
         if (!$order) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Commande non trouvée'
-            ], 404);
+            return response()->json(['message' => 'Commande non trouvée'], 404);
+        }
+
+        if ($order->status === 'completed' || $order->status === 'cancelled') {
+            return response()->json(['message' => 'Impossible de modifier une commande terminée'], 400);
         }
 
         $request->validate([
@@ -256,47 +192,44 @@ class OrderController extends Controller
             'items.*.special_notes' => 'nullable|string|max:255'
         ]);
 
-        try {
-            DB::beginTransaction();
+        DB::beginTransaction();
 
-            foreach ($request->items as $item) {
-                $menuItem = MenuItem::find($item['menu_item_id']);
-                
+        try {
+            foreach ($request->items as $itemData) {
+                $menuItem = MenuItem::find($itemData['menu_item_id']);
+
                 if (!$menuItem->is_available) {
                     throw new \Exception("{$menuItem->name} n'est pas disponible");
                 }
 
                 OrderItem::create([
                     'order_id' => $order->id,
-                    'menu_item_id' => $item['menu_item_id'],
-                    'quantity' => $item['quantity'],
+                    'menu_item_id' => $itemData['menu_item_id'],
+                    'quantity' => $itemData['quantity'],
                     'unit_price' => $menuItem->price,
-                    'special_notes' => $item['special_notes'] ?? null,
+                    'special_notes' => $itemData['special_notes'] ?? null,
                     'status' => 'pending'
                 ]);
             }
 
             // Recalculer les totaux
-            $this->calculateTotals($order);
+            $order->calculateTotals();
 
             DB::commit();
 
             return response()->json([
                 'success' => true,
                 'message' => 'Items ajoutés avec succès',
-                'data' => $order->fresh()->load('items.menuItem')
+                'data' => $order->load('items.menuItem')
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage()
-            ], 400);
+            return response()->json(['message' => $e->getMessage()], 400);
         }
     }
 
-    // Retirer un item d'une commande
+    // Retirer un item d'une commande (serveur)
     public function removeItem($orderId, $itemId)
     {
         $orderItem = OrderItem::where('order_id', $orderId)
@@ -304,35 +237,28 @@ class OrderController extends Controller
             ->first();
 
         if (!$orderItem) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Item non trouvé'
-            ], 404);
+            return response()->json(['message' => 'Item non trouvé'], 404);
         }
 
-        // Vérifier si la commande peut être modifiée
-        $order = $orderItem->order;
-        if (!in_array($order->status, ['pending', 'confirmed'])) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Cette commande ne peut plus être modifiée'
-            ], 400);
+        $order = Order::find($orderId);
+
+        if ($order->status === 'completed' || $order->status === 'cancelled') {
+            return response()->json(['message' => 'Impossible de modifier une commande terminée'], 400);
         }
 
         $orderItem->delete();
-        
+
         // Recalculer les totaux
-        $this->calculateTotals($order);
+        $order->calculateTotals();
 
         return response()->json([
             'success' => true,
-            'message' => 'Item retiré avec succès',
-            'data' => $order->fresh()->load('items.menuItem')
+            'message' => 'Item retiré avec succès'
         ]);
     }
 
-    // Payer une commande
-    public function payOrder(Request $request, $id)
+    // Payer une commande (serveur)
+    public function pay(Request $request, $id)
     {
         $request->validate([
             'payment_method' => 'required|in:cash,card,mobile_money'
@@ -341,49 +267,37 @@ class OrderController extends Controller
         $order = Order::find($id);
 
         if (!$order) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Commande non trouvée'
-            ], 404);
-        }
-
-        if ($order->status !== 'completed') {
-            return response()->json([
-                'success' => false,
-                'message' => 'La commande doit être complétée avant paiement'
-            ], 400);
+            return response()->json(['message' => 'Commande non trouvée'], 404);
         }
 
         $order->update([
             'payment_method' => $request->payment_method,
-            'payment_status' => 'paid'
+            'payment_status' => 'paid',
+            'status' => 'completed'
         ]);
 
         return response()->json([
             'success' => true,
-            'message' => 'Commande payée avec succès',
+            'message' => 'Paiement effectué avec succès',
             'data' => $order
         ]);
     }
 
-    // Générer une facture
-    public function generateFacture($id)
+    // Générer la facture (serveur)
+    public function bill($id)
     {
-        $order = Order::with(['user', 'table', 'server', 'items.menuItem'])->find($id);
+        $order = Order::with(['table', 'server', 'items.menuItem'])->find($id);
 
         if (!$order) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Commande non trouvée'
-            ], 404);
+            return response()->json(['message' => 'Commande non trouvée'], 404);
         }
 
-        $facture = [
+        $bill = [
             'order_id' => $order->id,
             'table_number' => $order->table->number,
             'date' => $order->created_at->format('Y-m-d'),
             'time' => $order->created_at->format('H:i'),
-            'server' => $order->server ? $order->server->name : 'N/A',
+            'server' => $order->server ? $order->server->name : $order->user->name,
             'items' => $order->items->map(function ($item) {
                 return [
                     'name' => $item->menuItem->name,
@@ -405,67 +319,17 @@ class OrderController extends Controller
         ]);
     }
 
-    // Commandes d'une table spécifique
+    // Commandes d'une table (serveur)
     public function tableOrders($tableId)
     {
-        $orders = Order::with(['user', 'server', 'items.menuItem'])
-            ->where('table_id', $tableId)
+        $orders = Order::where('table_id', $tableId)
             ->whereIn('status', ['pending', 'confirmed', 'preparing', 'ready', 'served'])
-            ->orderBy('created_at', 'desc')
+            ->with('items.menuItem')
             ->get();
 
         return response()->json([
             'success' => true,
             'data' => $orders
         ]);
-    }
-
-    // Méthodes privées
-    private function calculateTotals(Order $order)
-    {
-        $subtotal = $order->items->sum(function ($item) {
-            return $item->unit_price * $item->quantity;
-        });
-        
-        $taxRate = 0.18;
-        $tax = $subtotal * $taxRate;
-        $total = $subtotal + $tax;
-        
-        $order->update([
-            'subtotal' => $subtotal,
-            'tax' => $tax,
-            'total' => $total
-        ]);
-    }
-
-    private function checkAndUpdateStock(Order $order)
-    {
-        foreach ($order->items as $item) {
-            $menuItem = $item->menuItem;
-            
-            foreach ($menuItem->ingredients as $ingredient) {
-                $quantityNeeded = $ingredient->pivot->quantity_needed * $item->quantity;
-                
-                if ($ingredient->stock_quantity < $quantityNeeded) {
-                    throw new \Exception("Stock insuffisant pour {$ingredient->name}");
-                }
-                
-                $ingredient->decrement('stock_quantity', $quantityNeeded);
-                
-               
-            }
-        }
-    }
-
-    private function restoreStock(Order $order)
-    {
-        foreach ($order->items as $item) {
-            $menuItem = $item->menuItem;
-            
-            foreach ($menuItem->ingredients as $ingredient) {
-                $quantityNeeded = $ingredient->pivot->quantity_needed * $item->quantity;
-                $ingredient->increment('stock_quantity', $quantityNeeded);
-            }
-        }
     }
 }

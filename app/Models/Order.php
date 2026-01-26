@@ -1,13 +1,13 @@
 <?php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Order extends Model
 {
-    use HasFactory;
-
     protected $fillable = [
         'user_id',
         'table_id',
@@ -25,64 +25,42 @@ class Order extends Model
         'subtotal' => 'decimal:2',
         'tax' => 'decimal:2',
         'total' => 'decimal:2',
-        'created_at' => 'datetime'
     ];
 
-    // Relations
-    public function user()
+    public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    public function table()
-    {
-        return $this->belongsTo(Table::class);
-    }
-
     public function server()
+{
+    // On lie "server" au modèle User via la colonne server_id
+    return $this->belongsTo(User::class, 'server_id');
+}
+
+    public function table(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'server_id');
+        return $this->belongsTo(Table::class, 'table_id');
     }
 
-    public function items()
+    public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);
     }
 
-    // Scopes
-    public function scopePending($query)
+    public function calculateTotals(): self
     {
-        return $query->where('status', 'pending');
-    }
-
-    public function scopeToday($query)
-    {
-        return $query->whereDate('created_at', today());
-    }
-
-    public function scopeCompleted($query)
-    {
-        return $query->where('status', 'completed');
-    }
-
-  
-    public function calculateTotals()
-    {
-        $subtotal = $this->items->sum(function ($item) {
-            return $item->unit_price * $item->quantity;
-        });
-
-        $taxRate = 0.18; // 18% TVA
+        $subtotal = $this->items->sum(fn($item) => $item->unit_price * $item->quantity);
+        $taxRate = 0.18;
         $tax = $subtotal * $taxRate;
         $total = $subtotal + $tax;
 
         $this->update([
             'subtotal' => $subtotal,
             'tax' => $tax,
-            'total' => $total
+            'total' => $total,
         ]);
 
         return $this;
     }
-
 }

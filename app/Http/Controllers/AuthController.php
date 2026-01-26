@@ -5,21 +5,19 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rules;
 
 class AuthController extends Controller
 {
-
-     //Inscription Client
-
+    // Inscription client
     public function register(Request $request)
     {
         $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8|confirmed',
+            'password' => ['required', 'confirmed', Rules\Password::defaults()],
             'phone' => 'nullable|string|max:20',
         ]);
 
@@ -28,36 +26,32 @@ class AuthController extends Controller
             'email' => $request->email,
             'password' => Hash::make($request->password),
             'phone' => $request->phone,
+            'role' => 'client',
         ]);
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
             'success' => true,
-            'message' => 'Inscription réussie',
             'data' => [
                 'user' => $user,
-                'access_token' => $token,
-                'token_type' => 'Bearer',
+                'token' => $token
             ]
         ], 201);
     }
 
-
+    // Inscription staff (gérant seulement)
     public function registerStaff(Request $request)
     {
-        // Vérifier que l'utilisateur connecté est un gérant
-        if (!Auth::user() || !Auth::user()->isManager()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Non autorisé. Seul le gérant peut créer des employés.'
-            ], 403);
+        // Vérifier que l'utilisateur est gérant
+        if (Auth::user()->role !== 'manager') {
+            return response()->json(['message' => 'Non autorisé'], 403);
         }
 
         $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8|confirmed',
+            'password' => ['required', 'confirmed', Rules\Password::defaults()],
             'role' => 'required|in:server,manager',
             'phone' => 'nullable|string|max:20',
         ]);
@@ -72,14 +66,11 @@ class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Employé créé avec succès',
             'data' => $user
         ], 201);
     }
 
-
-     //Connexion
-
+    // Connexion
     public function login(Request $request)
     {
         $request->validate([
@@ -87,52 +78,36 @@ class AuthController extends Controller
             'password' => 'required',
         ]);
 
-        $user = User::where('email', $request->email)->first();
-
-        if (!$user || !Hash::check($request->password, $user->password)) {
-            throw ValidationException::withMessages([
-                'email' => ['Les identifiants sont incorrects.'],
-            ]);
+        if (!Auth::attempt($request->only('email', 'password'))) {
+            return response()->json(['message' => 'Identifiants invalides'], 401);
         }
 
-        // Supprimer les anciens tokens
-        $user->tokens()->delete();
-
-        // Créer un nouveau token
+        $user = User::where('email', $request->email)->first();
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
             'success' => true,
-            'message' => 'Connexion réussie',
             'data' => [
                 'user' => $user,
-                'access_token' => $token,
-                'token_type' => 'Bearer',
+                'token' => $token
             ]
-        ], 200);
+        ]);
     }
 
-
-     //Déconnexion
-
+    // Déconnexion
     public function logout(Request $request)
     {
         $request->user()->currentAccessToken()->delete();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Déconnexion réussie'
-        ], 200);
+        return response()->json(['success' => true, 'message' => 'Déconnexion réussie']);
     }
 
-
-     //Profil utilisateur
-
+    // Profil utilisateur
     public function profile(Request $request)
     {
         return response()->json([
             'success' => true,
             'data' => $request->user()
-        ], 200);
+        ]);
     }
 }
