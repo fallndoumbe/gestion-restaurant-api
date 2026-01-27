@@ -5,7 +5,7 @@ use App\Models\Order;
 use App\Models\DailyReport;
 use Carbon\Carbon;
 
-class OrderItemObserver
+class OrderObserver
 {
     public function updated(Order $order)
     {
